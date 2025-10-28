@@ -8,7 +8,9 @@ builder.Services.AddCors(opt =>
     {
         policy.WithOrigins(
                 "http://127.0.0.1:5500",
-                "http://localhost:5500"
+                "http://localhost:5500",
+                "http://localhost:5173",
+                "http://localhost:5174"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -31,6 +33,12 @@ public class TelemetryHub : Hub
         await Clients.Group($"tenant:{m.TenantSlug}")
             .SendAsync("measurementReceived", m);
     }
+
+    public async Task PublishAlert(AlertData alert)
+    {
+        await Clients.Group($"tenant:{alert.TenantSlug}")
+            .SendAsync("alertRaised", alert);
+    }
 }
 
 public record RealtimeMeasurement(
@@ -39,4 +47,15 @@ public record RealtimeMeasurement(
     string Type,
     double Value,
     System.DateTimeOffset Time
+);
+
+public record AlertData(
+    string TenantSlug,
+    System.Guid DeviceId,
+    string Type,
+    double Value,
+    System.DateTimeOffset Time,
+    System.Guid RuleId,
+    string Severity,
+    string Message
 );

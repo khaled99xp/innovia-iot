@@ -2,6 +2,24 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Add CORS
+builder.Services.AddCors(opt =>
+{
+    opt.AddPolicy("Frontend", policy =>
+    {
+        policy.WithOrigins(
+                "http://127.0.0.1:5500",
+                "http://localhost:5500",
+                "http://localhost:5173",
+                "http://localhost:5174"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
 builder.Services.AddDbContext<PortalDbContext>(o =>
     o.UseNpgsql(
         builder.Configuration.GetConnectionString("Db")
@@ -9,6 +27,9 @@ builder.Services.AddDbContext<PortalDbContext>(o =>
     )
 );
 var app = builder.Build();
+
+// Enable CORS
+app.UseCors("Frontend");
 // Ensure database and tables exist (quick-start dev convenience)
 using (var scope = app.Services.CreateScope())
 {
@@ -57,6 +78,28 @@ app.MapGet("/portal/{tenant}/devices/{deviceId}/measurements",
         .ToListAsync();
 
     return Results.Ok(new { deviceId, count = rows.Count, from, to, type, measurements = rows });
+});
+
+// API endpoint for frontend - get recent measurements for a device with limit
+app.MapGet("/api/devices/{deviceId}/measurements",
+    async (Guid deviceId, int? limit, PortalDbContext db) =>
+{
+    var q = db.Measurements.Where(m => m.DeviceId == deviceId);
+    var limitValue = limit ?? 10;
+
+    var rows = await q
+        .OrderByDescending(m => m.Time)
+        .Take(limitValue)
+        .Select(m => new { 
+            tenantSlug = "innovia", // Hardcoded for now
+            deviceId = m.DeviceId.ToString(),
+            type = m.Type, 
+            value = m.Value,
+            time = m.Time.ToString("o")
+        })
+        .ToListAsync();
+
+    return Results.Ok(rows);
 });
 
 // Return ALL series for a device grouped per type (points per type)

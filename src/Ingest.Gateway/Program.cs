@@ -213,6 +213,7 @@ public class IngestService
         // Publish in realtime
         foreach (var m in payload.Metrics)
         {
+            Console.WriteLine($"[REALTIME] Publishing {m.Type} = {m.Value} for device {ids.DeviceId} at {payload.Timestamp:o}");
             await _rt.PublishAsync(tenant, ids.DeviceId, m.Type, m.Value, payload.Timestamp);
         }
     }

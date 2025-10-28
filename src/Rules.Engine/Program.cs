@@ -40,6 +40,23 @@ var hubUrl = builder.Configuration.GetSection("Realtime")["HubUrl"]
 builder.Services.AddDbContext<RulesDbContext>(o => o.UseNpgsql(rulesConn));
 builder.Services.AddDbContext<IngestReadDbContext>(o => o.UseNpgsql(ingestConn));
 
+// Add CORS
+builder.Services.AddCors(opt =>
+{
+    opt.AddPolicy("Frontend", policy =>
+    {
+        policy.WithOrigins(
+                "http://127.0.0.1:5500",
+                "http://localhost:5500",
+                "http://localhost:5173",
+                "http://localhost:5174"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
 // SignalR client to publish alerts in real time
 builder.Services.AddSingleton<HubConnection>(_ =>
     new HubConnectionBuilder()
@@ -50,8 +67,26 @@ builder.Services.AddSingleton<HubConnection>(_ =>
 // Background worker
 builder.Services.AddHostedService<RulesWorker>();
 
+// Add Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 // Minimal admin/read endpoints (optional but useful for MVP)
 var app = builder.Build();
+
+// Enable CORS
+app.UseCors("Frontend");
+
+// Enable Swagger
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Rules.Engine v1");
+    c.RoutePrefix = "swagger";
+});
+
+// Redirect root to Swagger UI for convenience
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 // Ensure DB exists (MVP convenience). In production, prefer EF migrations.
 using (var scope = app.Services.CreateScope())
@@ -75,6 +110,7 @@ app.MapPost("/rules", async (RuleCreateDto dto, RulesDbContext db) =>
         Threshold = dto.Threshold,
         CooldownSeconds = dto.CooldownSeconds ?? 300,
         Enabled = dto.Enabled ?? true,
+        Message = dto.Message,
         CreatedAt = DateTimeOffset.UtcNow
     };
     db.Rules.Add(row);
@@ -89,6 +125,56 @@ app.MapGet("/rules", async (RulesDbContext db) =>
         .OrderByDescending(r => r.CreatedAt)
         .ToListAsync();
     return Results.Ok(rules);
+});
+
+// Update rule
+app.MapPut("/rules/{id:guid}", async (Guid id, RuleUpdateDto dto, RulesDbContext db) =>
+{
+    var rule = await db.Rules.FindAsync(id);
+    if (rule == null) return Results.NotFound();
+
+    rule.Type = dto.Type;
+    rule.Operator = dto.Op;
+    rule.Threshold = dto.Threshold;
+    rule.CooldownSeconds = dto.CooldownSeconds ?? rule.CooldownSeconds;
+    rule.Enabled = dto.Enabled ?? rule.Enabled;
+    rule.Message = dto.Message;
+    rule.UpdatedAt = DateTimeOffset.UtcNow;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(rule);
+});
+
+// Delete rule
+app.MapDelete("/rules/{id:guid}", async (Guid id, RulesDbContext db) =>
+{
+    var rule = await db.Rules.FindAsync(id);
+    if (rule == null) return Results.NotFound();
+
+    db.Rules.Remove(rule);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+// Toggle rule status
+app.MapPut("/rules/{id:guid}/toggle", async (Guid id, RuleToggleDto dto, RulesDbContext db) =>
+{
+    var rule = await db.Rules.FindAsync(id);
+    if (rule == null) return Results.NotFound();
+
+    rule.Enabled = dto.IsActive;
+    rule.UpdatedAt = DateTimeOffset.UtcNow;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(rule);
+});
+
+// Get rule by ID
+app.MapGet("/rules/{id:guid}", async (Guid id, RulesDbContext db) =>
+{
+    var rule = await db.Rules.FindAsync(id);
+    if (rule == null) return Results.NotFound();
+    return Results.Ok(rule);
 });
 
 // List latest alerts (optional filters)
@@ -190,19 +276,20 @@ public class RulesWorker : BackgroundService
                             Value = latest.Value,
                             Time = DateTimeOffset.UtcNow,
                             Severity = "warning",
-                            Message = $"Rule {r.Operator} {r.Threshold} hit for {r.Type} (value={latest.Value})"
+                            Message = !string.IsNullOrEmpty(r.Message) 
+                                ? r.Message 
+                                : $"Rule {r.Operator} {r.Threshold} hit for {r.Type} (value={latest.Value})"
                         };
 
                         _rules.Alerts.Add(alert);
                         await _rules.SaveChangesAsync(stoppingToken);
 
                         // Push to realtime (requires Realtime.Hub to expose a matching server method)
-                        // TODO: Implement PublishAlert on the hub; client method name can be "alertRaised" for browser subscribers.
                         try
                         {
                             await _hub.InvokeAsync("PublishAlert", new
                             {
-                                TenantId = alert.TenantId,
+                                TenantSlug = "innovia", // Hardcoded for now
                                 DeviceId = alert.DeviceId,
                                 Type = alert.Type,
                                 Value = alert.Value,
@@ -288,7 +375,9 @@ public class RuleRow
     public double Threshold { get; set; }
     public int? CooldownSeconds { get; set; } = 300;
     public bool Enabled { get; set; } = true;
+    public string? Message { get; set; } // Custom alert message
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public class AlertRow
@@ -323,5 +412,19 @@ public record RuleCreateDto(
     string Op,
     double Threshold,
     int? CooldownSeconds,
-    bool? Enabled
+    bool? Enabled,
+    string? Message
+);
+
+public record RuleUpdateDto(
+    string Type,
+    string Op,
+    double Threshold,
+    int? CooldownSeconds,
+    bool? Enabled,
+    string? Message
+);
+
+public record RuleToggleDto(
+    bool IsActive
 );

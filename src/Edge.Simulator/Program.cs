@@ -23,29 +23,76 @@ catch (Exception ex)
 }
 
 var rand = new Random();
-while (true)
+var devices = new[] { "dev-101", "dev-102", "dev-103", "dev-104", "dev-105", "dev-106", "dev-107", "dev-108", "dev-109", "dev-110" };
+
+// Send data for each device independently with precise timing
+var tasks = devices.Select(async deviceId =>
 {
-    var payload = new
+    var nextSendTime = DateTimeOffset.UtcNow.AddSeconds(10);
+    
+    while (true)
     {
-        deviceId = "dev-101",
-        apiKey = "dev-101-key",
-        timestamp = DateTimeOffset.UtcNow,
-        metrics = new object[]
+        var now = DateTimeOffset.UtcNow;
+        
+        // Calculate delay to ensure exact 10-second intervals
+        var delay = nextSendTime - now;
+        if (delay > TimeSpan.Zero)
         {
-            new { type = "temperature", value = 21.5 + rand.NextDouble(), unit = "C" },
-            new { type = "co2", value = 900 + rand.Next(0, 700), unit = "ppm" }
+            await Task.Delay(delay);
         }
-    };
+        
+        // Update next send time
+        nextSendTime = nextSendTime.AddSeconds(10);
+        
+        // Send temperature measurement
+        var tempPayload = new
+        {
+            deviceId = deviceId,
+            apiKey = $"{deviceId}-key",
+            timestamp = DateTimeOffset.UtcNow,
+            metrics = new object[]
+            {
+                new { type = "temperature", value = 20.0 + rand.NextDouble() * 10, unit = "C" }
+            }
+        };
 
-    var topic = "tenants/innovia/devices/dev-101/measurements";
-    var json = JsonSerializer.Serialize(payload);
+        var topic = $"tenants/innovia/devices/{deviceId}/measurements";
+        var tempJson = JsonSerializer.Serialize(tempPayload);
 
-    var message = new MqttApplicationMessageBuilder()
-        .WithTopic(topic)
-        .WithPayload(Encoding.UTF8.GetBytes(json))
-        .Build();
+        var tempMessage = new MqttApplicationMessageBuilder()
+            .WithTopic(topic)
+            .WithPayload(Encoding.UTF8.GetBytes(tempJson))
+            .Build();
 
-    await client.PublishAsync(message);
-    Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published to '{topic}': {json}");
-    await Task.Delay(TimeSpan.FromSeconds(10));
-}
+        await client.PublishAsync(tempMessage);
+        Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published temperature to '{topic}': {tempJson}");
+        
+        // Small delay between measurements
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+        
+        // Send CO2 measurement
+        var co2Payload = new
+        {
+            deviceId = deviceId,
+            apiKey = $"{deviceId}-key",
+            timestamp = DateTimeOffset.UtcNow,
+            metrics = new object[]
+            {
+                new { type = "co2", value = 800 + rand.Next(0, 800), unit = "ppm" }
+            }
+        };
+
+        var co2Json = JsonSerializer.Serialize(co2Payload);
+
+        var co2Message = new MqttApplicationMessageBuilder()
+            .WithTopic(topic)
+            .WithPayload(Encoding.UTF8.GetBytes(co2Json))
+            .Build();
+
+        await client.PublishAsync(co2Message);
+        Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published CO2 to '{topic}': {co2Json}");
+    }
+});
+
+// Start all device tasks concurrently
+await Task.WhenAll(tasks);
