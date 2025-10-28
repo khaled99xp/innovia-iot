@@ -23,10 +23,24 @@ catch (Exception ex)
 }
 
 var rand = new Random();
-var devices = new[] { "dev-101", "dev-102", "dev-103", "dev-104", "dev-105", "dev-106", "dev-107", "dev-108", "dev-109", "dev-110" };
 
-// Send data for each device independently with precise timing
-var tasks = devices.Select(async deviceId =>
+// Define 10 different sensors with different types
+var sensors = new[]
+{
+    new { DeviceId = "dev-101", Type = "temperature", Unit = "C", MinValue = 20.0, MaxValue = 30.0 },
+    new { DeviceId = "dev-102", Type = "co2", Unit = "ppm", MinValue = 800.0, MaxValue = 1600.0 },
+    new { DeviceId = "dev-103", Type = "humidity", Unit = "%", MinValue = 30.0, MaxValue = 80.0 },
+    new { DeviceId = "dev-104", Type = "temperature", Unit = "C", MinValue = 18.0, MaxValue = 28.0 },
+    new { DeviceId = "dev-105", Type = "voc", Unit = "ppb", MinValue = 50.0, MaxValue = 500.0 },
+    new { DeviceId = "dev-106", Type = "occupancy", Unit = "count", MinValue = 0.0, MaxValue = 10.0 },
+    new { DeviceId = "dev-107", Type = "door", Unit = "state", MinValue = 0.0, MaxValue = 1.0 },
+    new { DeviceId = "dev-108", Type = "energy", Unit = "kWh", MinValue = 0.1, MaxValue = 5.0 },
+    new { DeviceId = "dev-109", Type = "power", Unit = "W", MinValue = 10.0, MaxValue = 1000.0 },
+    new { DeviceId = "dev-110", Type = "co2", Unit = "ppm", MinValue = 400.0, MaxValue = 1200.0 }
+};
+
+// Send data for each sensor independently with precise timing
+var tasks = sensors.Select(async sensor =>
 {
     var nextSendTime = DateTimeOffset.UtcNow.AddSeconds(10);
     
@@ -44,53 +58,46 @@ var tasks = devices.Select(async deviceId =>
         // Update next send time
         nextSendTime = nextSendTime.AddSeconds(10);
         
-        // Send temperature measurement
-        var tempPayload = new
+        // Generate random value based on sensor type
+        double value;
+        if (sensor.Type == "door")
         {
-            deviceId = deviceId,
-            apiKey = $"{deviceId}-key",
+            // Door sensor: 0 (closed) or 1 (open)
+            value = rand.NextDouble() > 0.7 ? 1.0 : 0.0;
+        }
+        else if (sensor.Type == "occupancy")
+        {
+            // Occupancy sensor: integer values
+            value = rand.Next((int)sensor.MinValue, (int)sensor.MaxValue + 1);
+        }
+        else
+        {
+            // Other sensors: continuous values
+            value = sensor.MinValue + rand.NextDouble() * (sensor.MaxValue - sensor.MinValue);
+        }
+        
+        // Send measurement
+        var payload = new
+        {
+            deviceId = sensor.DeviceId,
+            apiKey = $"{sensor.DeviceId}-key",
             timestamp = DateTimeOffset.UtcNow,
             metrics = new object[]
             {
-                new { type = "temperature", value = 20.0 + rand.NextDouble() * 10, unit = "C" }
+                new { type = sensor.Type, value = value, unit = sensor.Unit }
             }
         };
 
-        var topic = $"tenants/innovia/devices/{deviceId}/measurements";
-        var tempJson = JsonSerializer.Serialize(tempPayload);
+        var topic = $"tenants/innovia/devices/{sensor.DeviceId}/measurements";
+        var json = JsonSerializer.Serialize(payload);
 
-        var tempMessage = new MqttApplicationMessageBuilder()
+        var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
-            .WithPayload(Encoding.UTF8.GetBytes(tempJson))
+            .WithPayload(Encoding.UTF8.GetBytes(json))
             .Build();
 
-        await client.PublishAsync(tempMessage);
-        Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published temperature to '{topic}': {tempJson}");
-        
-        // Small delay between measurements
-        await Task.Delay(TimeSpan.FromMilliseconds(50));
-        
-        // Send CO2 measurement
-        var co2Payload = new
-        {
-            deviceId = deviceId,
-            apiKey = $"{deviceId}-key",
-            timestamp = DateTimeOffset.UtcNow,
-            metrics = new object[]
-            {
-                new { type = "co2", value = 800 + rand.Next(0, 800), unit = "ppm" }
-            }
-        };
-
-        var co2Json = JsonSerializer.Serialize(co2Payload);
-
-        var co2Message = new MqttApplicationMessageBuilder()
-            .WithTopic(topic)
-            .WithPayload(Encoding.UTF8.GetBytes(co2Json))
-            .Build();
-
-        await client.PublishAsync(co2Message);
-        Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published CO2 to '{topic}': {co2Json}");
+        await client.PublishAsync(message);
+        Console.WriteLine($"[{DateTimeOffset.UtcNow:o}] Published {sensor.Type} to '{topic}': {json}");
     }
 });
 
