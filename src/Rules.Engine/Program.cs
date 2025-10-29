@@ -310,12 +310,15 @@ public class RulesWorker : BackgroundService
 
                     if (Matches(r.Operator, latest.Value, r.Threshold))
                     {
-                        // Cooldown: avoid spamming duplicate alerts for the same rule/device/type
-                        var cooldownAgo = DateTimeOffset.UtcNow.AddSeconds(-(r.CooldownSeconds ?? 300));
-                        var existsRecent = await _rules.Alerts
-                            .AnyAsync(a => a.RuleId == r.Id && a.DeviceId == latest.DeviceId && a.Time >= cooldownAgo, stoppingToken);
-
-                        if (existsRecent) continue;
+                        // Cooldown: if > 0, avoid duplicate alerts within the window; if 0, emit every match immediately
+                        var cooldownSeconds = r.CooldownSeconds ?? 0;
+                        if (cooldownSeconds > 0)
+                        {
+                            var cooldownAgo = DateTimeOffset.UtcNow.AddSeconds(-cooldownSeconds);
+                            var existsRecent = await _rules.Alerts
+                                .AnyAsync(a => a.RuleId == r.Id && a.DeviceId == latest.DeviceId && a.Time >= cooldownAgo, stoppingToken);
+                            if (existsRecent) continue;
+                        }
 
                         var alert = new AlertRow
                         {
@@ -424,7 +427,7 @@ public class RuleRow
     public string Type { get; set; } = ""; // e.g., "temperature"
     public string Operator { get; set; } = ">"; // ">", "<", ">=", "<=", "==", "!="
     public double Threshold { get; set; }
-    public int? CooldownSeconds { get; set; } = 300;
+    public int? CooldownSeconds { get; set; } = 0;
     public bool Enabled { get; set; } = true;
     public string? Message { get; set; } // Custom alert message
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
