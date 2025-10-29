@@ -34,6 +34,55 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<InnoviaDbContext>();
     db.Database.EnsureCreated();
+
+    // Optional seeding: set DEVICE_REGISTRY_SEED=true to seed a default tenant and 10 devices
+    var shouldSeed = Environment.GetEnvironmentVariable("DEVICE_REGISTRY_SEED");
+    if (!string.IsNullOrWhiteSpace(shouldSeed) &&
+        (string.Equals(shouldSeed, "true", StringComparison.OrdinalIgnoreCase) || shouldSeed == "1"))
+    {
+        var tenantSlug = Environment.GetEnvironmentVariable("SEED_TENANT_SLUG") ?? "innovia";
+        var tenantName = Environment.GetEnvironmentVariable("SEED_TENANT_NAME") ?? "Innovia";
+
+        var tenant = db.Tenants.FirstOrDefault(t => t.Slug == tenantSlug);
+        if (tenant == null)
+        {
+            tenant = new Tenant { Name = tenantName, Slug = tenantSlug };
+            db.Tenants.Add(tenant);
+            db.SaveChanges();
+        }
+
+        // Define 10 default devices (idempotent: only add missing by Serial within tenant)
+        var defaultDevices = new (string Serial, string Model, string Status)[]
+        {
+            ("dev-101", "Acme Temperature Sensor", "active"),
+            ("dev-102", "Acme CO₂ Monitor", "active"),
+            ("dev-103", "Acme Humidity Sensor", "active"),
+            ("dev-104", "Acme Temperature Pro", "active"),
+            ("dev-105", "Acme VOC Detector", "active"),
+            ("dev-106", "Acme Occupancy Counter", "active"),
+            ("dev-107", "Acme Door Sensor", "active"),
+            ("dev-108", "Acme Energy Meter", "active"),
+            ("dev-109", "Acme Power Monitor", "active"),
+            ("dev-110", "Acme CO₂ Pro", "active"),
+        };
+
+        foreach (var d in defaultDevices)
+        {
+            var exists = db.Devices.Any(x => x.TenantId == tenant.Id && x.Serial == d.Serial);
+            if (!exists)
+            {
+                db.Devices.Add(new Device
+                {
+                    TenantId = tenant.Id,
+                    Serial = d.Serial,
+                    Model = d.Model,
+                    Status = d.Status
+                });
+            }
+        }
+
+        db.SaveChanges();
+    }
 }
 
 // Enable Swagger always (not only in Development)
