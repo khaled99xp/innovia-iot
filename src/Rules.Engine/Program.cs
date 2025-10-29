@@ -191,6 +191,57 @@ app.MapGet("/alerts", async (Guid? tenantId, Guid? deviceId, string? type, DateT
     return Results.Ok(list);
 });
 
+// Delete single alert
+app.MapDelete("/alerts/{id:guid}", async (Guid id, RulesDbContext db) =>
+{
+    var alert = await db.Alerts.FindAsync(id);
+    if (alert == null)
+    {
+        return Results.NotFound();
+    }
+
+    db.Alerts.Remove(alert);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+// Delete multiple alerts
+app.MapDelete("/alerts", async (HttpContext context, RulesDbContext db) =>
+{
+    // Read the request body to get the array of IDs
+    using var reader = new StreamReader(context.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    
+    if (string.IsNullOrEmpty(body))
+    {
+        return Results.BadRequest("No IDs provided");
+    }
+
+    try
+    {
+        // Parse the JSON array of GUIDs
+        var ids = System.Text.Json.JsonSerializer.Deserialize<Guid[]>(body);
+        if (ids == null || !ids.Any())
+        {
+            return Results.BadRequest("Invalid IDs format");
+        }
+
+        var alerts = await db.Alerts.Where(a => ids.Contains(a.Id)).ToListAsync();
+        if (!alerts.Any())
+        {
+            return Results.NotFound();
+        }
+
+        db.Alerts.RemoveRange(alerts);
+        await db.SaveChangesAsync();
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest($"Error parsing request: {ex.Message}");
+    }
+});
+
 app.MapGet("/", () => Results.Ok(new { service = "Rules.Engine", status = "ok" }));
 
 // Start SignalR connection on boot
