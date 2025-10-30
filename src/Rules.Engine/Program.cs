@@ -315,9 +315,9 @@ public class RulesWorker : BackgroundService
                         if (cooldownSeconds > 0)
                         {
                             var cooldownAgo = DateTimeOffset.UtcNow.AddSeconds(-cooldownSeconds);
-                            var existsRecent = await _rules.Alerts
-                                .AnyAsync(a => a.RuleId == r.Id && a.DeviceId == latest.DeviceId && a.Time >= cooldownAgo, stoppingToken);
-                            if (existsRecent) continue;
+                        var existsRecent = await _rules.Alerts
+                            .AnyAsync(a => a.RuleId == r.Id && a.DeviceId == latest.DeviceId && a.Time >= cooldownAgo, stoppingToken);
+                        if (existsRecent) continue;
                         }
 
                         var alert = new AlertRow
